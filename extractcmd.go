@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"encoding/base64"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -10,18 +11,17 @@ import (
 	"path/filepath"
 )
 
+// ExtractCmd stores the parsed command line arguments used to invoke the Extract command
 type ExtractCmd struct {
 	Name string `arg help:"Name of the project for which to extract secrets"`
 }
 
+// Run runs the Extract command which extracts secrets from the secret store to the CWD
 func (cmd *ExtractCmd) Run() error {
-	fmt.Println("Loading project configuration")
-	config := LoadProjectConfig(cmd.Name)
-	fmt.Println("Pulling latest changes from repository")
-	PullLatest(config)
+	config := LoadAndUpdateRepo(cmd.Name)
 
-	repoDir := path.Join(ConfigDir(), config.RepoDir)
-	filePattern := path.Join(repoDir, "secret.*.enc")
+	RepoName := path.Join(ConfigDir(), config.RepoName)
+	filePattern := path.Join(RepoName, "secret.*.enc")
 
 	matches, err := filepath.Glob(filePattern)
 	if err != nil {
@@ -35,7 +35,10 @@ func (cmd *ExtractCmd) Run() error {
 			return err
 		}
 
-		block, err := aes.NewCipher([]byte(config.EncKey))
+		// This has already been vetted, so no need to check for error
+		key, _ := base64.StdEncoding.DecodeString(config.EncKey)
+
+		block, err := aes.NewCipher(key)
 		if err != nil {
 			return err
 		}
@@ -65,6 +68,8 @@ func (cmd *ExtractCmd) Run() error {
 		if err != nil {
 			return err
 		}
+
+		fmt.Println("Extraction complete")
 	}
 
 	return nil

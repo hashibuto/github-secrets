@@ -3,24 +3,25 @@ package main
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"io/ioutil"
-	"math/rand"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
 )
 
+// UpdateCmd stores the parsed command line arguments used to invoke the Update command.
 type UpdateCmd struct {
 	Name string `arg help:"Name of the project on which to update secrets"`
 }
 
+// Run runs the Update command which attempts to update the encrypted secrets in the git repository.  Only
+// modified secrets will be encrypted and committed to the repository.
 func (cmd *UpdateCmd) Run() error {
-	fmt.Println("Loading project configuration")
-	config := LoadProjectConfig(cmd.Name)
-	fmt.Println("Pulling latest changes from repository")
-	PullLatest(config)
+	config := LoadAndUpdateRepo(cmd.Name)
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -28,7 +29,7 @@ func (cmd *UpdateCmd) Run() error {
 	}
 	fmt.Println("Searching in", cwd)
 
-	matches, err := filepath.Glob("secret.*")
+	matches, err := filepath.Glob(SecretPattern)
 	if err != nil {
 		return err
 	}
@@ -66,8 +67,11 @@ func (cmd *UpdateCmd) Run() error {
 					return err
 				}
 
+				// This has already been vetted, so no need to check for error
+				key, _ := base64.StdEncoding.DecodeString(config.EncKey)
+
 				// Hash has changed, write the encrypted file and update the hash
-				block, err := aes.NewCipher([]byte(config.EncKey))
+				block, err := aes.NewCipher(key)
 				if err != nil {
 					return err
 				}
@@ -104,25 +108,15 @@ func (cmd *UpdateCmd) Run() error {
 		}
 	}
 
-	repoDir := path.Join(ConfigDir(), config.RepoDir)
+	repoDir := path.Join(ConfigDir(), config.RepoName)
 
-	filters := ["*.enc", "*.md5"]
-	for filter := range filters {
+	filters := []string{"*.enc", "*.md5"}
+	for _, filter := range filters {
 		err := ExecStreamOutput(repoDir, "git", "add", filter)
 		if err != nil {
 			return err
 		}
 	}
 
-	err := ExecStreamOutput(repoDir, "git", "commit", "-am", "\"Updating secrets\"")
-	if err != nil {
-		return err
-	}
-
-	err := ExecStreamOutput(repoDir, "git", "push", "origin", "master")
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return PushChanges(repoDir, config.Branch)
 }

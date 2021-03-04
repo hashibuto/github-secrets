@@ -1,8 +1,11 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/url"
 	"os"
 	"os/exec"
@@ -12,30 +15,39 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-const githubUser = "git@ghub.com"
+const githubUser = "git@github.com"
+const commitEmail = "ghsec@noreply.com"
 
+// InitCmd stores the parsed command line arguments used to invoke the Init command.
 type InitCmd struct {
-	Name      string `arg help:"Name of project to initialize"`
-	GitHubURL string `arg help:"URL of the GitHub repository which stores the secrets"`
+	Name          string `arg help:"Name of project to initialize"`
+	GitHubURL     string `arg help:"URL of the GitHub repository which stores the secrets"`
+	CommitterName string `arg help:"Name to associate with commits from this machine"`
 }
 
+// Run runs the Init command which initializes the configuration environment and clones the pre-made
+// remote git repository which will house the encrypted secrets
 func (cmd *InitCmd) Run() error {
-	ghUrl, err := url.Parse(cmd.GitHubURL)
+	configLoc := ConfigFile(cmd.Name)
+	_, err := os.Stat(configLoc)
+	if err == nil {
+		// File already exists
+		log.Fatal("A project by this name has already been initialized")
+	}
+
+	ghURL, err := url.Parse(cmd.GitHubURL)
 	if err != nil {
-		fmt.Println("Unable to parse URL: %v", cmd.GitHubURL)
-		os.Exit(1)
+		log.Fatal("Unable to parse URL:", cmd.GitHubURL)
 	}
 
-	if ghUrl.Host != "github.com" {
-		fmt.Println("Not a github URL")
-		os.Exit(1)
+	if ghURL.Host != "github.com" {
+		log.Fatal("Not a github URL")
 	}
 
-	if len(ghUrl.Path) == 0 {
-		fmt.Println("URL does not point to a repository")
-		os.Exit(1)
+	if len(ghURL.Path) == 0 {
+		log.Fatal("URL does not point to a repository")
 	}
-	pathRunes := []rune(ghUrl.Path)
+	pathRunes := []rune(ghURL.Path)
 	if pathRunes[0] == '/' {
 		pathRunes = pathRunes[1:]
 	}
@@ -57,7 +69,7 @@ func (cmd *InitCmd) Run() error {
 	rmCmd := exec.Command("rm", "-rf", path.Join(ghSecDir, repoName))
 	err = rmCmd.Run()
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	// Prepare the ssh address for cloning the repository
@@ -65,28 +77,46 @@ func (cmd *InitCmd) Run() error {
 	fmt.Println("Cloning secrets from", sshAddr)
 	err = ExecStreamOutput(ghSecDir, "git", "clone", sshAddr)
 	if err != nil {
-		fmt.Println("Failed to clone remote secrets repository, aborting...")
-		os.Exit(1)
+		log.Fatal("Failed to clone remote secrets repository, aborting...")
+	}
+
+	fmt.Println("Configuring committer info")
+	repoDir := path.Join(ghSecDir, repoName)
+	err = ExecStreamOutput(repoDir, "git", "config", "user.email", commitEmail)
+	if err != nil {
+		return err
+	}
+	err = ExecStreamOutput(repoDir, "git", "config", "user.name", cmd.CommitterName)
+	if err != nil {
+		return err
+	}
+
+	key := make([]byte, KeyBytes)
+	_, err = rand.Read(key)
+	if err != nil {
+		return err
 	}
 
 	secretConfig := &Config{
-		RepoDir: repoName,
-		EncKey:  "<replace with your 32 byte encryption key>",
+		RepoName: repoName,
+		EncKey:   base64.StdEncoding.EncodeToString(key),
+		Branch:   DefaultBranch,
 	}
 
 	fmt.Println("Writing configuration...")
 	ymlData, err := yaml.Marshal(secretConfig)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
-	configLoc := ConfigFile(cmd.Name)
 	err = ioutil.WriteFile(configLoc, ymlData, 0600)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
-	fmt.Printf("Please edit the file %v and set your 32 byte encryption key\n", configLoc)
+	fmt.Println("Your configuration has been initialized at", configLoc)
+	fmt.Println("If this is for an existing secrets repository, please edit the file and change the 'enckey' value and replace with you existing Base64 encoded token.")
+	fmt.Println("If you are initializing a new repository, you may securely exchange the Base64 encoded key located at 'enckey' with your teammates.")
 
 	return nil
 }
