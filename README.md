@@ -9,6 +9,17 @@ This project does not have a concept of ACLs - this is a single access gets all 
 ## Prerequisites
 This has been tested on Linux, but may or may not run on other operating systems.  Git must be preinstalled.
 
+## Installation
+You can install the latest binary (presently available in AMD64 linux version) by running the following command:
+```
+curl -L https://github.com/hashibuto/github-secrets/releases/download/1.0.0/ghsec --output ./ghsec; chmod +x ./ghsec; sudo mv -f ./ghsec /usr/local/bin
+```
+
+Alternatively, you can clone the repository and build the binary for your target system by running (from the repository root):
+```
+go build
+```
+
 ## Creating a new secret store
 First thing in getting set up, is to create a new github repository which will be used to store the encrypted secrets.
 
