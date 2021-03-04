@@ -8,7 +8,6 @@ import (
 	"log"
 	"net/url"
 	"os"
-	"os/exec"
 	"path"
 	"strings"
 
@@ -66,11 +65,7 @@ func (cmd *InitCmd) Run() error {
 	}
 
 	// Delete any existing repository
-	rmCmd := exec.Command("rm", "-rf", path.Join(ghSecDir, repoName))
-	err = rmCmd.Run()
-	if err != nil {
-		return err
-	}
+	err = os.RemoveAll(path.Join(ghSecDir, repoName))
 
 	// Prepare the ssh address for cloning the repository
 	sshAddr := fmt.Sprintf("%v:%v.git", githubUser, repoPath)
